@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+recordings/
+*.log
+.DS_Store
+.env
+renderer/build/
+renderer/node_modules/

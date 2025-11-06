@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(npx tsc)",
+      "Bash(npm start)",
+      "Bash(./node_modules/.bin/electron:*)",
+      "Bash(npm run start:forge:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

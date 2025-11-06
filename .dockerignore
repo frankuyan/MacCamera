@@ -1,0 +1,11 @@
+node_modules
+dist
+out
+recordings
+.git
+.gitignore
+*.log
+.DS_Store
+.env
+renderer/node_modules
+renderer/build

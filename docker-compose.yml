@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  maccamera:
+    build: .
+    container_name: maccamera
+    environment:
+      - DISPLAY=${DISPLAY:-:99}
+      - USE_XVFB=true
+    volumes:
+      # Mount recordings directory
+      - ./recordings:/app/recordings
+      # X11 socket for GUI (Linux)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Video devices
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/snd:/dev/snd
+    devices:
+      - /dev/video0
+      - /dev/snd
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
