@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startRecording: (options: any) => ipcRenderer.invoke('start-recording', options),
   stopRecording: () => ipcRenderer.invoke('stop-recording'),
   saveRecording: (data: any) => ipcRenderer.invoke('save-recording', data),
+  convertToMp4: (data: any) => ipcRenderer.invoke('convert-to-mp4', data),
   getRecordingsDir: () => ipcRenderer.invoke('get-recordings-dir'),
   openRecordingsFolder: () => ipcRenderer.invoke('open-recordings-folder'),
 });
@@ -21,6 +22,7 @@ declare global {
       startRecording: (options: any) => Promise<any>;
       stopRecording: () => Promise<any>;
       saveRecording: (data: any) => Promise<any>;
+      convertToMp4: (data: any) => Promise<any>;
       getRecordingsDir: () => Promise<any>;
       openRecordingsFolder: () => Promise<any>;
     };

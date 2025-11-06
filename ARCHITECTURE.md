@@ -85,11 +85,13 @@ MacCamera is built using Electron + React with a clean separation between the ma
    → Collect data chunks → Store in memory
    ```
 
-3. **Stop Recording**
+3. **Stop Recording & Convert**
    ```
    Click "Stop Recording" → MediaRecorder.stop()
    → Combine chunks into Blob → Convert to ArrayBuffer
-   → IPC to main process → Save to disk → Show path to user
+   → IPC to main process → Save WebM to disk
+   → FFmpeg conversion: WebM → MP4 (H.264 + AAC)
+   → Delete WebM → Show MP4 path to user
    ```
 
 ### Photo Capture Flow
@@ -133,21 +135,22 @@ MacCamera/
 
 ## Key Design Decisions
 
-### Why Browser MediaRecorder Instead of FFmpeg?
+### Hybrid Recording Architecture
 
-**Current Implementation**: Browser's native MediaRecorder API
-- ✓ Simpler architecture
-- ✓ No external dependencies at runtime
+**Recording**: Browser's native MediaRecorder API
 - ✓ Hardware acceleration built-in
+- ✓ Real-time recording with VP9/VP8 codec
 - ✓ Cross-platform without OS-specific code
-- ✓ High quality with VP9 codec
+- ✓ Minimal latency during recording
 
-**FFmpeg Ready for Advanced Features**:
-The `ffmpeg-static` package is included and ready for:
-- Format conversion
-- Post-processing filters
-- Multiple quality presets
-- Custom encoding pipelines
+**Post-Processing**: FFmpeg for MP4 Conversion
+- ✓ Automatic WebM → MP4 conversion
+- ✓ H.264 (libx264) for universal compatibility
+- ✓ AAC audio encoding
+- ✓ Fast-start optimization for streaming
+- ✓ Original WebM file auto-deleted after conversion
+
+This hybrid approach provides the best of both worlds: fast recording with maximum compatibility.
 
 ### Security: Context Isolation
 

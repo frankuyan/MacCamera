@@ -259,6 +259,14 @@ body {
   background: #3a3a3a;
 }
 
+.converting-status {
+  margin: 5px 0 0 0;
+  font-size: 12px;
+  color: #4facfe;
+  font-weight: 600;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
 @media (max-width: 1024px) {
   .main-content {
     flex-direction: column;

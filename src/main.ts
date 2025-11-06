@@ -154,6 +154,63 @@ ipcMain.handle('save-recording', async (event, data: {
   }
 });
 
+// Convert WebM to MP4 using FFmpeg
+ipcMain.handle('convert-to-mp4', async (event, data: {
+  webmPath: string;
+  mp4Filename: string;
+  keepWebm?: boolean;
+}) => {
+  try {
+    const mp4Path = path.join(recordingsDir, data.mp4Filename);
+
+    return new Promise((resolve) => {
+      const ffmpeg = spawn(ffmpegPath, [
+        '-i', data.webmPath,
+        '-c:v', 'libx264',       // H.264 video codec
+        '-preset', 'medium',      // Encoding speed/quality tradeoff
+        '-crf', '23',             // Quality (lower = better, 23 is good default)
+        '-c:a', 'aac',            // AAC audio codec
+        '-b:a', '192k',           // Audio bitrate
+        '-movflags', '+faststart', // Enable streaming
+        '-y',                     // Overwrite output file
+        mp4Path
+      ]);
+
+      let errorOutput = '';
+
+      ffmpeg.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          // Conversion successful
+          // Only delete WebM if keepWebm is false
+          if (!data.keepWebm) {
+            try {
+              fs.unlinkSync(data.webmPath);
+            } catch (err) {
+              console.error('Error deleting WebM file:', err);
+            }
+          }
+          resolve({ success: true, path: mp4Path });
+        } else {
+          console.error('FFmpeg error:', errorOutput);
+          resolve({ success: false, error: `FFmpeg exited with code ${code}` });
+        }
+      });
+
+      ffmpeg.on('error', (err) => {
+        console.error('FFmpeg spawn error:', err);
+        resolve({ success: false, error: String(err) });
+      });
+    });
+  } catch (error) {
+    console.error('Error converting to MP4:', error);
+    return { success: false, error: String(error) };
+  }
+});
+
 // Get recordings directory
 ipcMain.handle('get-recordings-dir', async () => {
   return { success: true, path: recordingsDir };

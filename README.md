@@ -129,8 +129,9 @@ docker run -it --rm \
 5. Set the frame rate (24, 30, or 60 fps)
 6. Click "Start Recording" to begin
 7. Click "Stop Recording" to finish
+8. Check "Convert to MP4 (background)" for automatic MP4 conversion
 
-Videos are saved in WebM format with high-quality VP9 codec.
+Videos are saved instantly as WebM. If enabled, they're automatically converted to MP4 in the background while you keep working. Both files are kept for flexibility.
 
 ### Photo Capture
 
@@ -165,9 +166,23 @@ Click "Open Recordings Folder" in the app to access your files.
 - **30 fps** - Standard video (recommended)
 - **60 fps** - Smooth motion
 
-### Video Codec
+### Video Format
 
-The application uses WebM container with VP9 video codec at 10 Mbps bitrate for high-quality recordings. If VP9 is not supported by your system, it falls back to VP8 or standard WebM.
+The application uses a hybrid approach for best performance:
+
+**WebM (Instant Save)**:
+- Saved immediately when you stop recording
+- VP9/VP8 codec for high quality
+- Ready to use right away
+
+**MP4 (Optional Background Conversion)**:
+- Toggle "Convert to MP4 (background)" in settings
+- Automatic conversion while you continue working
+- **Video Codec**: H.264 (libx264) - Universal compatibility
+- **Quality**: CRF 23 (high quality)
+- **Audio Codec**: AAC at 192 kbps
+- **Optimization**: Fast-start enabled for streaming
+- Both WebM and MP4 files are kept
 
 ### Audio Quality
 
@@ -231,7 +246,7 @@ maccamera/
 - **React**: Frontend UI library
 - **TypeScript**: Type-safe JavaScript
 - **MediaRecorder API**: Browser-native recording
-- **FFmpeg**: Media processing (via ffmpeg-static)
+- **FFmpeg**: WebM to MP4 conversion (via ffmpeg-static)
 
 ### Building from Source
 

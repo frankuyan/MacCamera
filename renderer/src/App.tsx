@@ -21,6 +21,8 @@ function App() {
   const [fps, setFps] = useState(30);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [recordingsDir, setRecordingsDir] = useState<string>('');
+  const [convertToMp4, setConvertToMp4] = useState(true);
+  const [isConverting, setIsConverting] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -162,18 +164,41 @@ function App() {
         const buffer = await blob.arrayBuffer();
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `recording-${timestamp}.webm`;
+        const webmFilename = `recording-${timestamp}.webm`;
+        const mp4Filename = `recording-${timestamp}.mp4`;
 
         if (window.electronAPI) {
-          const result = await window.electronAPI.saveRecording({
+          // First save the WebM file
+          const saveResult = await window.electronAPI.saveRecording({
             buffer,
-            filename,
+            filename: webmFilename,
           });
 
-          if (result.success) {
-            alert(`Recording saved to: ${result.path}`);
+          if (saveResult.success) {
+            // Show WebM is ready immediately
+            alert(`Recording saved!\nWebM: ${saveResult.path}`);
+
+            // If user wants MP4, convert in background
+            if (convertToMp4) {
+              setIsConverting(true);
+
+              // Convert to MP4 in background
+              window.electronAPI.convertToMp4({
+                webmPath: saveResult.path,
+                mp4Filename: mp4Filename,
+                keepWebm: true, // Keep the original WebM file
+              }).then((convertResult: any) => {
+                setIsConverting(false);
+
+                if (convertResult.success) {
+                  alert(`MP4 conversion complete!\nMP4: ${convertResult.path}\nWebM: ${saveResult.path}`);
+                } else {
+                  alert('MP4 conversion failed. WebM file is still available at: ' + saveResult.path);
+                }
+              });
+            }
           } else {
-            alert('Error saving recording: ' + result.error);
+            alert('Error saving recording: ' + saveResult.error);
           }
         }
       };
@@ -351,6 +376,23 @@ function App() {
               <option value={60}>60 fps</option>
             </select>
           </div>
+
+          {recordingMode === 'video' && (
+            <div className="control-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={convertToMp4}
+                  onChange={(e) => setConvertToMp4(e.target.checked)}
+                  disabled={isRecording || isConverting}
+                />
+                Convert to MP4 (background)
+              </label>
+              {isConverting && (
+                <p className="converting-status">Converting to MP4...</p>
+              )}
+            </div>
+          )}
 
           <div className="action-buttons">
             {recordingMode === 'video' ? (
