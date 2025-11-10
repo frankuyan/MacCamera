@@ -1,157 +1,110 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import './App.css';
-
-interface Device {
-  deviceId: string;
-  label: string;
-  kind: string;
-}
-
-type RecordingMode = 'video' | 'photo';
+import Toast from './components/Toast';
+import RecordingTimer from './components/RecordingTimer';
+import { useMediaDevices } from './hooks/useMediaDevices';
+import { useMediaStream } from './hooks/useMediaStream';
+import { useSettings } from './hooks/useSettings';
+import { useToast } from './hooks/useToast';
+import {
+  VIDEO_BITRATE,
+  RECORDING_TIME_SLICE,
+  JPEG_QUALITY,
+  RESOLUTIONS,
+  FRAME_RATES,
+  CODEC_PREFERENCES,
+} from './constants';
 
 function App() {
-  const [videoDevices, setVideoDevices] = useState<Device[]>([]);
-  const [audioDevices, setAudioDevices] = useState<Device[]>([]);
-  const [selectedVideoDevice, setSelectedVideoDevice] = useState<string>('');
-  const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingMode, setRecordingMode] = useState<RecordingMode>('video');
-  const [withAudio, setWithAudio] = useState(true);
-  const [resolution, setResolution] = useState('1920x1080');
-  const [fps, setFps] = useState(30);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [recordingsDir, setRecordingsDir] = useState<string>('');
-  const [convertToMp4, setConvertToMp4] = useState(true);
-  const [isConverting, setIsConverting] = useState(false);
+  // Hooks
+  const { toasts, hideToast, success, error: showError, info } = useToast();
+  const {
+    videoDevices,
+    audioDevices,
+    selectedVideoDevice,
+    selectedAudioDevice,
+    setSelectedVideoDevice,
+    setSelectedAudioDevice,
+  } = useMediaDevices();
+  const {
+    resolution,
+    setResolution,
+    fps,
+    setFps,
+    withAudio,
+    setWithAudio,
+    convertToMp4,
+    setConvertToMp4,
+    recordingMode,
+    setRecordingMode,
+  } = useSettings();
+  const { stream, error: streamError } = useMediaStream({
+    selectedVideoDevice,
+    selectedAudioDevice,
+    withAudio,
+    resolution,
+    fps,
+  });
 
+  // State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  const [recordingsDir, setRecordingsDir] = useState<string>('');
+
+  // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // Get available devices
+  // Display stream errors
   useEffect(() => {
-    const getDevices = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
+    if (streamError) {
+      showError(`Camera error: ${streamError}`);
+    }
+  }, [streamError, showError]);
 
-        const videoInputs = devices
-          .filter(device => device.kind === 'videoinput')
-          .map(device => ({
-            deviceId: device.deviceId,
-            label: device.label || `Camera ${device.deviceId.slice(0, 8)}`,
-            kind: device.kind,
-          }));
-
-        const audioInputs = devices
-          .filter(device => device.kind === 'audioinput')
-          .map(device => ({
-            deviceId: device.deviceId,
-            label: device.label || `Microphone ${device.deviceId.slice(0, 8)}`,
-            kind: device.kind,
-          }));
-
-        setVideoDevices(videoInputs);
-        setAudioDevices(audioInputs);
-
-        if (videoInputs.length > 0 && !selectedVideoDevice) {
-          setSelectedVideoDevice(videoInputs[0].deviceId);
-        }
-        if (audioInputs.length > 0 && !selectedAudioDevice) {
-          setSelectedAudioDevice(audioInputs[0].deviceId);
-        }
-      } catch (error) {
-        console.error('Error getting devices:', error);
-      }
-    };
-
-    getDevices();
-
-    // Get recordings directory
+  // Get recordings directory
+  useEffect(() => {
     if (window.electronAPI) {
-      window.electronAPI.getRecordingsDir().then((result: any) => {
-        if (result.success) {
-          setRecordingsDir(result.path);
+      window.electronAPI.getRecordingsDir().then((result) => {
+        if (result.success && result.data) {
+          setRecordingsDir(result.data.path);
         }
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Start camera preview
+  // Set video element source when stream changes
   useEffect(() => {
-    if (!selectedVideoDevice) return;
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
 
-    const startPreview = async () => {
-      try {
-        // Stop existing stream
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-
-        const [width, height] = resolution.split('x').map(Number);
-
-        const constraints: MediaStreamConstraints = {
-          video: {
-            deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined,
-            width: { ideal: width },
-            height: { ideal: height },
-            frameRate: { ideal: fps },
-          },
-          audio: withAudio && selectedAudioDevice ? {
-            deviceId: { exact: selectedAudioDevice },
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          } : false,
-        };
-
-        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-        setStream(newStream);
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = newStream;
-        }
-      } catch (error) {
-        console.error('Error starting preview:', error);
-        alert('Error accessing camera: ' + error);
+  // Get best available codec
+  const getBestCodec = useCallback((): string => {
+    for (const codec of CODEC_PREFERENCES) {
+      if (MediaRecorder.isTypeSupported(codec)) {
+        return codec;
       }
-    };
+    }
+    return 'video/webm'; // Fallback
+  }, []);
 
-    startPreview();
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVideoDevice, selectedAudioDevice, withAudio, resolution, fps]);
-
-  const startRecording = async () => {
+  // Start recording
+  const startRecording = useCallback(async () => {
     if (!stream) return;
 
     try {
       chunksRef.current = [];
 
-      // Use the highest quality settings available
+      const mimeType = getBestCodec();
       const options = {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 10000000, // 10 Mbps for high quality
+        mimeType,
+        videoBitsPerSecond: VIDEO_BITRATE,
       };
 
-      // Try different codecs if VP9 is not supported
-      let mimeType = options.mimeType;
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/webm;codecs=vp8';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm';
-        }
-      }
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        ...options,
-        mimeType,
-      });
+      const mediaRecorder = new MediaRecorder(stream, options);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -168,58 +121,67 @@ function App() {
         const mp4Filename = `recording-${timestamp}.mp4`;
 
         if (window.electronAPI) {
-          // First save the WebM file
-          const saveResult = await window.electronAPI.saveRecording({
-            buffer,
-            filename: webmFilename,
-          });
+          try {
+            // First save the WebM file
+            const saveResult = await window.electronAPI.saveRecording({
+              buffer,
+              filename: webmFilename,
+            });
 
-          if (saveResult.success) {
-            // Show WebM is ready immediately
-            alert(`Recording saved!\nWebM: ${saveResult.path}`);
+            if (saveResult.success && saveResult.data) {
+              info('Recording saved as WebM');
 
-            // If user wants MP4, convert in background
-            if (convertToMp4) {
-              setIsConverting(true);
+              // If user wants MP4, convert in background
+              if (convertToMp4) {
+                setIsConverting(true);
 
-              // Convert to MP4 in background
-              window.electronAPI.convertToMp4({
-                webmPath: saveResult.path,
-                mp4Filename: mp4Filename,
-                keepWebm: true, // Keep the original WebM file
-              }).then((convertResult: any) => {
+                // Convert to MP4 in background
+                const convertResult = await window.electronAPI.convertToMp4({
+                  webmPath: saveResult.data.path,
+                  mp4Filename: mp4Filename,
+                  keepWebm: true, // Keep the original WebM file
+                });
+
                 setIsConverting(false);
 
-                if (convertResult.success) {
-                  alert(`MP4 conversion complete!\nMP4: ${convertResult.path}\nWebM: ${saveResult.path}`);
+                if (convertResult.success && convertResult.data) {
+                  success(`Recording saved!\nMP4: ${convertResult.data.path}\nWebM: ${saveResult.data.path}`);
                 } else {
-                  alert('MP4 conversion failed. WebM file is still available at: ' + saveResult.path);
+                  showError(`MP4 conversion failed: ${convertResult.error || 'Unknown error'}`);
                 }
-              });
+              } else {
+                success(`Recording saved to: ${saveResult.data.path}`);
+              }
+            } else {
+              showError(`Error saving recording: ${saveResult.error || 'Unknown error'}`);
             }
-          } else {
-            alert('Error saving recording: ' + saveResult.error);
+          } catch (err) {
+            showError(`Error saving recording: ${err instanceof Error ? err.message : 'Unknown error'}`);
           }
         }
       };
 
-      mediaRecorder.start(100); // Collect data every 100ms
+      mediaRecorder.start(RECORDING_TIME_SLICE);
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      alert('Error starting recording: ' + error);
+      info('Recording started');
+    } catch (err) {
+      console.error('Error starting recording:', err);
+      showError(`Error starting recording: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  };
+  }, [stream, getBestCodec, convertToMp4, info, success, showError]);
 
-  const stopRecording = () => {
+  // Stop recording
+  const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      info('Recording stopped');
     }
-  };
+  }, [isRecording, info]);
 
-  const takePhoto = async () => {
+  // Take photo
+  const takePhoto = useCallback(async () => {
     if (!videoRef.current || !stream) return;
 
     try {
@@ -232,38 +194,78 @@ function App() {
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, width, height);
 
-        canvas.toBlob(async (blob) => {
-          if (blob) {
-            const buffer = await blob.arrayBuffer();
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `photo-${timestamp}.jpg`;
+        canvas.toBlob(
+          async (blob) => {
+            if (blob) {
+              const buffer = await blob.arrayBuffer();
+              const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+              const filename = `photo-${timestamp}.jpg`;
 
-            if (window.electronAPI) {
-              const result = await window.electronAPI.saveRecording({
-                buffer,
-                filename,
-              });
+              if (window.electronAPI) {
+                const result = await window.electronAPI.saveRecording({
+                  buffer,
+                  filename,
+                });
 
-              if (result.success) {
-                alert(`Photo saved to: ${result.path}`);
-              } else {
-                alert('Error saving photo: ' + result.error);
+                if (result.success && result.data) {
+                  success(`Photo saved to: ${result.data.path}`);
+                } else {
+                  showError(`Error saving photo: ${result.error || 'Unknown error'}`);
+                }
               }
             }
-          }
-        }, 'image/jpeg', 1.0); // Maximum quality
+          },
+          'image/jpeg',
+          JPEG_QUALITY
+        );
       }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      alert('Error taking photo: ' + error);
+    } catch (err) {
+      console.error('Error taking photo:', err);
+      showError(`Error taking photo: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  };
+  }, [stream, resolution, success, showError]);
 
-  const openRecordingsFolder = async () => {
+  // Open recordings folder
+  const openRecordingsFolder = useCallback(async () => {
     if (window.electronAPI) {
       await window.electronAPI.openRecordingsFolder();
     }
-  };
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Space: Start/Stop recording (when in video mode)
+      if (e.code === 'Space' && !isRecording && recordingMode === 'video') {
+        e.preventDefault();
+        startRecording();
+      } else if (e.code === 'Space' && isRecording) {
+        e.preventDefault();
+        stopRecording();
+      }
+
+      // P: Take photo (when in photo mode)
+      if (e.code === 'KeyP' && recordingMode === 'photo') {
+        e.preventDefault();
+        takePhoto();
+      }
+
+      // Cmd/Ctrl + O: Open recordings folder
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyO') {
+        e.preventDefault();
+        openRecordingsFolder();
+      }
+
+      // Escape: Stop recording if recording
+      if (e.code === 'Escape' && isRecording) {
+        e.preventDefault();
+        stopRecording();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, recordingMode, startRecording, stopRecording, takePhoto, openRecordingsFolder]);
 
   return (
     <div className="App">
@@ -274,14 +276,9 @@ function App() {
 
       <div className="main-content">
         <div className="video-container">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="video-preview"
-          />
+          <video ref={videoRef} autoPlay playsInline muted className="video-preview" />
           {isRecording && <div className="recording-indicator">● REC</div>}
+          <RecordingTimer isRecording={isRecording} />
         </div>
 
         <div className="controls-panel">
@@ -312,7 +309,7 @@ function App() {
               onChange={(e) => setSelectedVideoDevice(e.target.value)}
               disabled={isRecording}
             >
-              {videoDevices.map(device => (
+              {videoDevices.map((device) => (
                 <option key={device.deviceId} value={device.deviceId}>
                   {device.label}
                 </option>
@@ -340,7 +337,7 @@ function App() {
                 onChange={(e) => setSelectedAudioDevice(e.target.value)}
                 disabled={isRecording}
               >
-                {audioDevices.map(device => (
+                {audioDevices.map((device) => (
                   <option key={device.deviceId} value={device.deviceId}>
                     {device.label}
                   </option>
@@ -356,24 +353,22 @@ function App() {
               onChange={(e) => setResolution(e.target.value)}
               disabled={isRecording}
             >
-              <option value="640x480">640x480 (VGA)</option>
-              <option value="1280x720">1280x720 (HD)</option>
-              <option value="1920x1080">1920x1080 (Full HD)</option>
-              <option value="2560x1440">2560x1440 (QHD)</option>
-              <option value="3840x2160">3840x2160 (4K)</option>
+              {RESOLUTIONS.map((res) => (
+                <option key={res.value} value={res.value}>
+                  {res.label}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="control-group">
             <label>Frame Rate:</label>
-            <select
-              value={fps}
-              onChange={(e) => setFps(Number(e.target.value))}
-              disabled={isRecording}
-            >
-              <option value={24}>24 fps</option>
-              <option value={30}>30 fps</option>
-              <option value={60}>60 fps</option>
+            <select value={fps} onChange={(e) => setFps(Number(e.target.value))} disabled={isRecording}>
+              {FRAME_RATES.map((rate) => (
+                <option key={rate.value} value={rate.value}>
+                  {rate.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -388,9 +383,7 @@ function App() {
                 />
                 Convert to MP4 (background)
               </label>
-              {isConverting && (
-                <p className="converting-status">Converting to MP4...</p>
-              )}
+              {isConverting && <p className="converting-status">Converting to MP4...</p>}
             </div>
           )}
 
@@ -409,9 +402,29 @@ function App() {
               </>
             ) : (
               <button className="photo-button" onClick={takePhoto}>
-                📷 Take Photo
+                Take Photo
               </button>
             )}
+          </div>
+
+          <div className="keyboard-shortcuts">
+            <details>
+              <summary>Keyboard Shortcuts</summary>
+              <ul>
+                <li>
+                  <kbd>Space</kbd> - Start/Stop recording
+                </li>
+                <li>
+                  <kbd>P</kbd> - Take photo
+                </li>
+                <li>
+                  <kbd>Cmd/Ctrl</kbd> + <kbd>O</kbd> - Open recordings folder
+                </li>
+                <li>
+                  <kbd>Esc</kbd> - Stop recording
+                </li>
+              </ul>
+            </details>
           </div>
 
           <div className="info-section">
@@ -424,6 +437,13 @@ function App() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Toast notifications */}
+      <div className="toast-container">
+        {toasts.map((toast) => (
+          <Toast key={toast.id} message={toast.message} type={toast.type} onClose={() => hideToast(toast.id)} />
+        ))}
       </div>
     </div>
   );

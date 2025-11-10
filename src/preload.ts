@@ -1,30 +1,54 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import {
+  RecordingOptions,
+  SaveRecordingData,
+  ConvertToMp4Data,
+  IPCResponse,
+  RecordingsDirectory,
+  SavedRecording,
+  ConvertedRecording
+} from './types/shared';
 
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
-  getVideoDevices: () => ipcRenderer.invoke('get-video-devices'),
-  getAudioDevices: () => ipcRenderer.invoke('get-audio-devices'),
-  startRecording: (options: any) => ipcRenderer.invoke('start-recording', options),
-  stopRecording: () => ipcRenderer.invoke('stop-recording'),
-  saveRecording: (data: any) => ipcRenderer.invoke('save-recording', data),
-  convertToMp4: (data: any) => ipcRenderer.invoke('convert-to-mp4', data),
-  getRecordingsDir: () => ipcRenderer.invoke('get-recordings-dir'),
-  openRecordingsFolder: () => ipcRenderer.invoke('open-recordings-folder'),
+  getVideoDevices: (): Promise<IPCResponse> =>
+    ipcRenderer.invoke('get-video-devices'),
+
+  getAudioDevices: (): Promise<IPCResponse> =>
+    ipcRenderer.invoke('get-audio-devices'),
+
+  startRecording: (options: RecordingOptions): Promise<IPCResponse> =>
+    ipcRenderer.invoke('start-recording', options),
+
+  stopRecording: (): Promise<IPCResponse> =>
+    ipcRenderer.invoke('stop-recording'),
+
+  saveRecording: (data: SaveRecordingData): Promise<IPCResponse<SavedRecording>> =>
+    ipcRenderer.invoke('save-recording', data),
+
+  convertToMp4: (data: ConvertToMp4Data): Promise<IPCResponse<ConvertedRecording>> =>
+    ipcRenderer.invoke('convert-to-mp4', data),
+
+  getRecordingsDir: (): Promise<IPCResponse<RecordingsDirectory>> =>
+    ipcRenderer.invoke('get-recordings-dir'),
+
+  openRecordingsFolder: (): Promise<IPCResponse> =>
+    ipcRenderer.invoke('open-recordings-folder'),
 });
 
 // Type declaration for TypeScript
 declare global {
   interface Window {
     electronAPI: {
-      getVideoDevices: () => Promise<any>;
-      getAudioDevices: () => Promise<any>;
-      startRecording: (options: any) => Promise<any>;
-      stopRecording: () => Promise<any>;
-      saveRecording: (data: any) => Promise<any>;
-      convertToMp4: (data: any) => Promise<any>;
-      getRecordingsDir: () => Promise<any>;
-      openRecordingsFolder: () => Promise<any>;
+      getVideoDevices: () => Promise<IPCResponse>;
+      getAudioDevices: () => Promise<IPCResponse>;
+      startRecording: (options: RecordingOptions) => Promise<IPCResponse>;
+      stopRecording: () => Promise<IPCResponse>;
+      saveRecording: (data: SaveRecordingData) => Promise<IPCResponse<SavedRecording>>;
+      convertToMp4: (data: ConvertToMp4Data) => Promise<IPCResponse<ConvertedRecording>>;
+      getRecordingsDir: () => Promise<IPCResponse<RecordingsDirectory>>;
+      openRecordingsFolder: () => Promise<IPCResponse>;
     };
   }
 }
