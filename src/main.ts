@@ -1,13 +1,97 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
-import * as fs from 'fs';
+import { promises as fs } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
+import {
+  RecordingOptions,
+  SaveRecordingData,
+  ConvertToMp4Data,
+  IPCResponse,
+  RecordingsDirectory,
+  SavedRecording,
+  ConvertedRecording
+} from './types/shared';
 
 const ffmpegPath = require('ffmpeg-static');
 
 let mainWindow: BrowserWindow | null = null;
 let recordingProcess: ChildProcess | null = null;
 let recordingsDir: string;
+
+// Constants
+const MIN_FREE_SPACE_MB = 100; // Minimum 100MB free space required
+
+/**
+ * Sanitize filename to prevent path traversal attacks
+ */
+function sanitizeFilename(filename: string): string {
+  // Extract basename to prevent path traversal
+  const basename = path.basename(filename);
+  // Remove any characters that aren't alphanumeric, dash, underscore, or dot
+  return basename.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+/**
+ * Create sanitized error response
+ */
+function createErrorResponse<T = never>(error: unknown): IPCResponse<T> {
+  const message = error instanceof Error ? error.message : 'An unknown error occurred';
+  // Don't expose stack traces or system paths to renderer
+  const sanitizedMessage = message.replace(/\/[^\s]+/g, '[path]');
+  return { success: false, error: sanitizedMessage };
+}
+
+/**
+ * Check available disk space
+ */
+async function hasEnoughDiskSpace(): Promise<boolean> {
+  try {
+    const stats = await fs.statfs(recordingsDir);
+    const freeSpaceMB = (stats.bavail * stats.bsize) / (1024 * 1024);
+    return freeSpaceMB > MIN_FREE_SPACE_MB;
+  } catch (error) {
+    console.error('Error checking disk space:', error);
+    return true; // Fail open to allow recording if check fails
+  }
+}
+
+/**
+ * Validate recording options
+ */
+function validateRecordingOptions(options: any): options is RecordingOptions {
+  return (
+    typeof options === 'object' &&
+    typeof options.deviceId === 'string' &&
+    (options.audioDeviceId === undefined || typeof options.audioDeviceId === 'string') &&
+    (options.mode === 'video' || options.mode === 'photo') &&
+    typeof options.withAudio === 'boolean' &&
+    typeof options.resolution === 'string' &&
+    typeof options.fps === 'number'
+  );
+}
+
+/**
+ * Validate save recording data
+ */
+function validateSaveRecordingData(data: any): data is SaveRecordingData {
+  return (
+    typeof data === 'object' &&
+    data.buffer instanceof ArrayBuffer &&
+    typeof data.filename === 'string'
+  );
+}
+
+/**
+ * Validate convert to MP4 data
+ */
+function validateConvertToMp4Data(data: any): data is ConvertToMp4Data {
+  return (
+    typeof data === 'object' &&
+    typeof data.webmPath === 'string' &&
+    typeof data.mp4Filename === 'string' &&
+    (data.keepWebm === undefined || typeof data.keepWebm === 'boolean')
+  );
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -17,9 +101,27 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      // Add Content Security Policy
+      sandbox: false, // Need false for preload script
     },
     titleBarStyle: 'hiddenInset',
     title: 'MacCamera',
+  });
+
+  // Set Content Security Policy
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'; " +
+          "script-src 'self' 'unsafe-inline'; " +
+          "style-src 'self' 'unsafe-inline'; " +
+          "media-src 'self' blob: mediastream:; " +
+          "img-src 'self' data: blob:;"
+        ]
+      }
+    });
   });
 
   // In development, load from React dev server
@@ -39,13 +141,15 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Initialize recordings directory after app is ready
   recordingsDir = path.join(app.getPath('documents'), 'MacCamera');
 
   // Ensure recordings directory exists
-  if (!fs.existsSync(recordingsDir)) {
-    fs.mkdirSync(recordingsDir, { recursive: true });
+  try {
+    await fs.mkdir(recordingsDir, { recursive: true });
+  } catch (error) {
+    console.error('Error creating recordings directory:', error);
   }
 
   createWindow();
@@ -64,49 +168,57 @@ app.on('window-all-closed', () => {
 });
 
 // Get available video devices
-ipcMain.handle('get-video-devices', async () => {
+ipcMain.handle('get-video-devices', async (): Promise<IPCResponse> => {
   try {
-    const sources = await desktopCapturer.getSources({
-      types: ['window', 'screen'],
-    });
-
-    // For actual webcam devices, we'll rely on the browser's navigator.mediaDevices
+    // Webcam devices are handled by the browser's navigator.mediaDevices
     // This handler is mainly for fallback/additional info
-    return { success: true, sources };
+    return { success: true };
   } catch (error) {
     console.error('Error getting video devices:', error);
-    return { success: false, error: String(error) };
+    return createErrorResponse(error);
   }
 });
 
 // Get available audio devices
-ipcMain.handle('get-audio-devices', async () => {
-  // Audio devices are handled by the renderer process via navigator.mediaDevices
-  return { success: true };
+ipcMain.handle('get-audio-devices', async (): Promise<IPCResponse> => {
+  try {
+    // Audio devices are handled by the renderer process via navigator.mediaDevices
+    return { success: true };
+  } catch (error) {
+    console.error('Error getting audio devices:', error);
+    return createErrorResponse(error);
+  }
 });
 
 // Start recording with FFmpeg
-ipcMain.handle('start-recording', async (event, options: {
-  deviceId: string;
-  audioDeviceId?: string;
-  mode: 'video' | 'photo';
-  withAudio: boolean;
-  resolution: string;
-  fps: number;
-}) => {
+ipcMain.handle('start-recording', async (event, options: unknown): Promise<IPCResponse> => {
   try {
+    // Validate input
+    if (!validateRecordingOptions(options)) {
+      return { success: false, error: 'Invalid recording options' };
+    }
+
+    // Check disk space
+    const hasSpace = await hasEnoughDiskSpace();
+    if (!hasSpace) {
+      return {
+        success: false,
+        error: `Insufficient disk space. At least ${MIN_FREE_SPACE_MB}MB required.`
+      };
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const outputPath = path.join(
-      recordingsDir,
-      `recording-${timestamp}.${options.mode === 'photo' ? 'jpg' : 'mp4'}`
-    );
+    const filename = `recording-${timestamp}.${options.mode === 'photo' ? 'jpg' : 'mp4'}`;
+    const outputPath = path.join(recordingsDir, filename);
 
     // For photo mode, we'll handle it differently (capture from stream)
     if (options.mode === 'photo') {
       return {
         success: true,
-        message: 'Photo mode - capture from stream',
-        path: outputPath,
+        data: {
+          message: 'Photo mode - capture from stream',
+          path: outputPath,
+        }
       };
     }
 
@@ -114,17 +226,19 @@ ipcMain.handle('start-recording', async (event, options: {
     // and save the blob here when stopped
     return {
       success: true,
-      message: 'Recording started',
-      path: outputPath,
+      data: {
+        message: 'Recording started',
+        path: outputPath,
+      }
     };
   } catch (error) {
     console.error('Error starting recording:', error);
-    return { success: false, error: String(error) };
+    return createErrorResponse(error);
   }
 });
 
 // Stop recording
-ipcMain.handle('stop-recording', async () => {
+ipcMain.handle('stop-recording', async (): Promise<IPCResponse> => {
   try {
     if (recordingProcess) {
       recordingProcess.kill('SIGINT');
@@ -133,35 +247,60 @@ ipcMain.handle('stop-recording', async () => {
     return { success: true };
   } catch (error) {
     console.error('Error stopping recording:', error);
-    return { success: false, error: String(error) };
+    return createErrorResponse(error);
   }
 });
 
 // Save recorded video blob
-ipcMain.handle('save-recording', async (event, data: {
-  buffer: ArrayBuffer;
-  filename: string;
-}) => {
+ipcMain.handle('save-recording', async (event, data: unknown): Promise<IPCResponse<SavedRecording>> => {
   try {
-    const outputPath = path.join(recordingsDir, data.filename);
-    const buffer = Buffer.from(data.buffer);
-    fs.writeFileSync(outputPath, buffer);
+    // Validate input
+    if (!validateSaveRecordingData(data)) {
+      return { success: false, error: 'Invalid recording data' };
+    }
 
-    return { success: true, path: outputPath };
+    // Sanitize filename to prevent path traversal
+    const sanitizedFilename = sanitizeFilename(data.filename);
+    const outputPath = path.join(recordingsDir, sanitizedFilename);
+
+    // Check disk space
+    const hasSpace = await hasEnoughDiskSpace();
+    if (!hasSpace) {
+      return {
+        success: false,
+        error: `Insufficient disk space. At least ${MIN_FREE_SPACE_MB}MB required.`
+      };
+    }
+
+    // Use async file operations
+    const buffer = Buffer.from(data.buffer);
+    await fs.writeFile(outputPath, buffer);
+
+    return { success: true, data: { path: outputPath } };
   } catch (error) {
     console.error('Error saving recording:', error);
-    return { success: false, error: String(error) };
+    return createErrorResponse(error);
   }
 });
 
 // Convert WebM to MP4 using FFmpeg
-ipcMain.handle('convert-to-mp4', async (event, data: {
-  webmPath: string;
-  mp4Filename: string;
-  keepWebm?: boolean;
-}) => {
+ipcMain.handle('convert-to-mp4', async (event, data: unknown): Promise<IPCResponse<ConvertedRecording>> => {
   try {
-    const mp4Path = path.join(recordingsDir, data.mp4Filename);
+    // Validate input
+    if (!validateConvertToMp4Data(data)) {
+      return { success: false, error: 'Invalid conversion data' };
+    }
+
+    // Sanitize filename
+    const sanitizedFilename = sanitizeFilename(data.mp4Filename);
+    const mp4Path = path.join(recordingsDir, sanitizedFilename);
+
+    // Verify input file exists
+    try {
+      await fs.access(data.webmPath);
+    } catch {
+      return { success: false, error: 'Input file not found' };
+    }
 
     return new Promise((resolve) => {
       const ffmpeg = spawn(ffmpegPath, [
@@ -182,47 +321,53 @@ ipcMain.handle('convert-to-mp4', async (event, data: {
         errorOutput += data.toString();
       });
 
-      ffmpeg.on('close', (code) => {
+      ffmpeg.on('close', async (code) => {
         if (code === 0) {
           // Conversion successful
           // Only delete WebM if keepWebm is false
           if (!data.keepWebm) {
             try {
-              fs.unlinkSync(data.webmPath);
+              await fs.unlink(data.webmPath);
             } catch (err) {
               console.error('Error deleting WebM file:', err);
             }
           }
-          resolve({ success: true, path: mp4Path });
+          resolve({ success: true, data: { path: mp4Path } });
         } else {
           console.error('FFmpeg error:', errorOutput);
-          resolve({ success: false, error: `FFmpeg exited with code ${code}` });
+          resolve({ success: false, error: `Conversion failed with code ${code}` });
         }
       });
 
       ffmpeg.on('error', (err) => {
         console.error('FFmpeg spawn error:', err);
-        resolve({ success: false, error: String(err) });
+        resolve(createErrorResponse(err));
       });
     });
   } catch (error) {
     console.error('Error converting to MP4:', error);
-    return { success: false, error: String(error) };
+    return createErrorResponse(error);
   }
 });
 
 // Get recordings directory
-ipcMain.handle('get-recordings-dir', async () => {
-  return { success: true, path: recordingsDir };
+ipcMain.handle('get-recordings-dir', async (): Promise<IPCResponse<RecordingsDirectory>> => {
+  try {
+    return { success: true, data: { path: recordingsDir } };
+  } catch (error) {
+    console.error('Error getting recordings directory:', error);
+    return createErrorResponse(error);
+  }
 });
 
 // Open recordings folder
-ipcMain.handle('open-recordings-folder', async () => {
+ipcMain.handle('open-recordings-folder', async (): Promise<IPCResponse> => {
   try {
     const { shell } = require('electron');
     await shell.openPath(recordingsDir);
     return { success: true };
   } catch (error) {
-    return { success: false, error: String(error) };
+    console.error('Error opening recordings folder:', error);
+    return createErrorResponse(error);
   }
 });
