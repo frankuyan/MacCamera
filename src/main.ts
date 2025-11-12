@@ -283,6 +283,46 @@ ipcMain.handle('save-recording', async (event, data: unknown): Promise<IPCRespon
   }
 });
 
+/**
+ * Get optimal FFmpeg encoding arguments based on platform
+ */
+function getOptimalEncodingArgs(inputPath: string, outputPath: string): string[] {
+  const baseArgs = ['-i', inputPath];
+
+  // Try hardware acceleration first (much faster)
+  // macOS: h264_videotoolbox (Apple VideoToolbox)
+  // Linux: h264_vaapi (Intel/AMD) or h264_nvenc (NVIDIA)
+  if (process.platform === 'darwin') {
+    // macOS hardware acceleration
+    return [
+      ...baseArgs,
+      '-c:v', 'h264_videotoolbox',  // Hardware encoder
+      '-b:v', '5000k',               // Video bitrate (5 Mbps - good quality)
+      '-profile:v', 'high',          // H.264 High profile
+      '-c:a', 'aac',                 // AAC audio codec
+      '-b:a', '192k',                // Audio bitrate
+      '-movflags', '+faststart',     // Enable streaming
+      '-y',                          // Overwrite output file
+      outputPath
+    ];
+  } else {
+    // Linux/Windows - use software encoding with optimizations
+    // Using 'veryfast' preset: 5-10x faster than 'medium' with minimal quality loss
+    return [
+      ...baseArgs,
+      '-c:v', 'libx264',             // Software H.264 encoder
+      '-preset', 'veryfast',         // Much faster than 'medium' (was bottleneck!)
+      '-crf', '23',                  // Quality (0-51, 23 is good default)
+      '-threads', '0',               // Use all available CPU threads
+      '-c:a', 'aac',                 // AAC audio codec
+      '-b:a', '192k',                // Audio bitrate
+      '-movflags', '+faststart',     // Enable streaming
+      '-y',                          // Overwrite output file
+      outputPath
+    ];
+  }
+}
+
 // Convert WebM to MP4 using FFmpeg
 ipcMain.handle('convert-to-mp4', async (event, data: unknown): Promise<IPCResponse<ConvertedRecording>> => {
   try {
@@ -303,27 +343,34 @@ ipcMain.handle('convert-to-mp4', async (event, data: unknown): Promise<IPCRespon
     }
 
     return new Promise((resolve) => {
-      const ffmpeg = spawn(ffmpegPath, [
-        '-i', data.webmPath,
-        '-c:v', 'libx264',       // H.264 video codec
-        '-preset', 'medium',      // Encoding speed/quality tradeoff
-        '-crf', '23',             // Quality (lower = better, 23 is good default)
-        '-c:a', 'aac',            // AAC audio codec
-        '-b:a', '192k',           // Audio bitrate
-        '-movflags', '+faststart', // Enable streaming
-        '-y',                     // Overwrite output file
-        mp4Path
-      ]);
+      // Get optimal encoding arguments for the platform
+      const ffmpegArgs = getOptimalEncodingArgs(data.webmPath, mp4Path);
+      const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
 
       let errorOutput = '';
+      let progressOutput = '';
 
-      ffmpeg.stderr.on('data', (data) => {
-        errorOutput += data.toString();
+      ffmpeg.stderr.on('data', (chunk) => {
+        const output = chunk.toString();
+        errorOutput += output;
+        progressOutput += output;
+
+        // Send progress updates to renderer (FFmpeg outputs to stderr)
+        if (mainWindow && output.includes('time=')) {
+          const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})/);
+          if (timeMatch) {
+            mainWindow.webContents.send('conversion-progress', {
+              time: `${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}`
+            });
+          }
+        }
       });
 
       ffmpeg.on('close', async (code) => {
         if (code === 0) {
           // Conversion successful
+          console.log('MP4 conversion completed successfully');
+
           // Only delete WebM if keepWebm is false
           if (!data.keepWebm) {
             try {
