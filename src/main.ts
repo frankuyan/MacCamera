@@ -287,7 +287,10 @@ ipcMain.handle('save-recording', async (event, data: unknown): Promise<IPCRespon
  * Get optimal FFmpeg encoding arguments based on platform
  */
 function getOptimalEncodingArgs(inputPath: string, outputPath: string): string[] {
-  const baseArgs = ['-i', inputPath];
+  const baseArgs = [
+    '-i', inputPath,
+    '-vsync', '0',                   // CRITICAL: Preserve original frame rate and timestamps
+  ];
 
   // Try hardware acceleration first (much faster)
   // macOS: h264_videotoolbox (Apple VideoToolbox)
@@ -296,27 +299,37 @@ function getOptimalEncodingArgs(inputPath: string, outputPath: string): string[]
     // macOS hardware acceleration
     return [
       ...baseArgs,
-      '-c:v', 'h264_videotoolbox',  // Hardware encoder
-      '-b:v', '5000k',               // Video bitrate (5 Mbps - good quality)
-      '-profile:v', 'high',          // H.264 High profile
+      '-c:v', 'h264_videotoolbox',   // Hardware encoder
+      '-b:v', '12000k',              // Video bitrate 12 Mbps (matches input quality)
+      '-maxrate', '15000k',          // Max bitrate for complex scenes
+      '-bufsize', '24000k',          // Buffer size (2x maxrate)
+      '-profile:v', 'high',          // H.264 High profile for best quality
+      '-pix_fmt', 'yuv420p',         // Pixel format for compatibility
+      '-tag:v', 'avc1',              // QuickTime-compatible codec tag
       '-c:a', 'aac',                 // AAC audio codec
-      '-b:a', '192k',                // Audio bitrate
-      '-movflags', '+faststart',     // Enable streaming
+      '-b:a', '256k',                // Higher audio bitrate for quality
+      '-ar', '48000',                // 48kHz audio sample rate
+      '-movflags', '+faststart',     // Enable streaming/fast playback
       '-y',                          // Overwrite output file
       outputPath
     ];
   } else {
     // Linux/Windows - use software encoding with optimizations
-    // Using 'veryfast' preset: 5-10x faster than 'medium' with minimal quality loss
     return [
       ...baseArgs,
       '-c:v', 'libx264',             // Software H.264 encoder
-      '-preset', 'veryfast',         // Much faster than 'medium' (was bottleneck!)
-      '-crf', '23',                  // Quality (0-51, 23 is good default)
+      '-preset', 'ultrafast',        // Fastest encoding (10-20x faster than 'veryfast')
+      '-crf', '18',                  // Higher quality (18 = visually lossless)
+      '-maxrate', '15000k',          // Max bitrate cap
+      '-bufsize', '30000k',          // Buffer size
+      '-pix_fmt', 'yuv420p',         // Pixel format for compatibility
+      '-profile:v', 'high',          // H.264 High profile
+      '-level', '4.2',               // H.264 level for 4K support
       '-threads', '0',               // Use all available CPU threads
       '-c:a', 'aac',                 // AAC audio codec
-      '-b:a', '192k',                // Audio bitrate
-      '-movflags', '+faststart',     // Enable streaming
+      '-b:a', '256k',                // Higher audio bitrate
+      '-ar', '48000',                // 48kHz audio sample rate
+      '-movflags', '+faststart',     // Enable streaming/fast playback
       '-y',                          // Overwrite output file
       outputPath
     ];
