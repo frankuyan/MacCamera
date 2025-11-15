@@ -270,8 +270,13 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>MacCamera</h1>
-        <p className="subtitle">Cross-platform Webcam Recording</p>
+        <div className="header-content">
+          <img src="/logo.svg" alt="MacCamera Logo" className="app-logo" />
+          <div className="header-text">
+            <h1>MacCamera</h1>
+            <p className="subtitle">Cross-platform Webcam Recording</p>
+          </div>
+        </div>
       </header>
 
       <div className="main-content">
