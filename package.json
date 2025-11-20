@@ -9,8 +9,7 @@
     "build:renderer": "cd renderer && npm run build",
     "package": "electron-forge package",
     "make": "electron-forge make",
-    "dev": "concurrently \"tsc -w\" \"cd renderer && npm start\" \"wait-on http://localhost:3000 && electron-forge start\"",
-    "postinstall": "cd renderer && npm install"
+    "dev": "concurrently \"tsc -w\" \"cd renderer && npm start\" \"wait-on http://localhost:3000 && electron-forge start\""
   },
   "keywords": [
     "webcam",
