@@ -5,11 +5,6 @@ set -e
 
 echo "Building MacCamera for macOS..."
 
-# Install dependencies
-echo "Installing dependencies..."
-npm install
-cd renderer && npm install && cd ..
-
 # Build TypeScript
 echo "Building TypeScript..."
 npm run build
