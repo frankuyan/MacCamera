@@ -19,6 +19,10 @@ A cross-platform webcam recording application for macOS and Linux with support f
 
 - **Node.js**: v20 or higher
 - **npm**: v10 or higher
+- **FFmpeg**: Required for MP4 conversion (optional - will auto-download if not installed)
+  - **macOS**: `brew install ffmpeg`
+  - **Linux**: `sudo apt install ffmpeg` (Ubuntu/Debian) or `sudo yum install ffmpeg` (RHEL/Fedora)
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
 
 ### For Docker Deployment
 
@@ -246,7 +250,7 @@ maccamera/
 - **React**: Frontend UI library
 - **TypeScript**: Type-safe JavaScript
 - **MediaRecorder API**: Browser-native recording
-- **FFmpeg**: WebM to MP4 conversion (via ffmpeg-static)
+- **FFmpeg**: WebM to MP4 conversion (system installation or auto-download)
 
 ### Building from Source
 

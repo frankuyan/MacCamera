@@ -4,9 +4,28 @@ module.exports = {
     executableName: 'maccamera',
     icon: './assets/icon',
     asar: true,
-    extraResource: [
-      './node_modules/ffmpeg-static'
-    ]
+    ignore: [
+      /^\/\.git/,
+      /^\/\.github/,
+      /^\/\.vscode/,
+      /^\/\.claude/,
+      /^\/node_modules\/\.cache/,
+      /^\/renderer\/node_modules/,
+      /^\/renderer\/src/,
+      /^\/renderer\/public/,
+      /^\/out/,
+      /^\/\.env/,
+      /\.md$/,
+      /^\/Dockerfile/,
+      /^\/docker-compose\.yml/,
+      /^\/\.dockerignore/,
+      /^\/\.prettierrc/,
+      /^\/\.prettierignore/,
+      /^\/\.eslintrc\.js/,
+      /^\/scripts/,
+    ],
+    prune: true,
+    derefSymlinks: true
   },
   rebuildConfig: {},
   makers: [
@@ -19,7 +38,7 @@ module.exports = {
       config: {
         name: 'MacCamera',
         icon: './assets/icon.icns',
-        format: 'ULFO'
+        format: 'UDBZ' // Better compression than ULFO
       }
     },
     {

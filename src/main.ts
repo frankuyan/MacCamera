@@ -11,8 +11,7 @@ import {
   SavedRecording,
   ConvertedRecording
 } from './types/shared';
-
-const ffmpegPath = require('ffmpeg-static');
+import { getFFmpegPath, isFFmpegAvailable } from './ffmpeg-utils';
 
 let mainWindow: BrowserWindow | null = null;
 let recordingProcess: ChildProcess | null = null;
@@ -355,6 +354,14 @@ ipcMain.handle('convert-to-mp4', async (event, data: unknown): Promise<IPCRespon
       return { success: false, error: 'Input file not found' };
     }
 
+    // Get FFmpeg path (system or downloaded)
+    let ffmpegPath: string;
+    try {
+      ffmpegPath = await getFFmpegPath();
+    } catch (error) {
+      return { success: false, error: 'FFmpeg not available. Please install FFmpeg on your system.' };
+    }
+
     return new Promise((resolve) => {
       // Get optimal encoding arguments for the platform
       const ffmpegArgs = getOptimalEncodingArgs(data.webmPath, mp4Path);
@@ -428,6 +435,21 @@ ipcMain.handle('open-recordings-folder', async (): Promise<IPCResponse> => {
     return { success: true };
   } catch (error) {
     console.error('Error opening recordings folder:', error);
+    return createErrorResponse(error);
+  }
+});
+
+// Check FFmpeg availability
+ipcMain.handle('check-ffmpeg', async (): Promise<IPCResponse<{ available: boolean; path?: string }>> => {
+  try {
+    const available = await isFFmpegAvailable();
+    if (available) {
+      const ffmpegPath = await getFFmpegPath();
+      return { success: true, data: { available: true, path: ffmpegPath } };
+    }
+    return { success: true, data: { available: false } };
+  } catch (error) {
+    console.error('Error checking FFmpeg:', error);
     return createErrorResponse(error);
   }
 });
